@@ -182,18 +182,27 @@ USART2->CR1 |= USART_Enable;
     BlueLEDoff();
     Green2LEDoff();
 
-char txbuf[8000];
-char rxbuf[8000];
+unsigned int BUFSIZE = 8000;
+
+char txbuf[BUFSIZE];
+char rxbuf[BUFSIZE];
 
 char* MODE_PRESSED = "MODE_PRESSED\r\n";
 char* MODE_RELEASED = "MODE_RELEASED\r\n";
 
+char* USER_PRESSED = "USER_PRESSED\r\n";
+char* USER_RELEASED = "USER_RELEASED\r\n";
+
+
+unsigned int MODE_RELEASED_LEN = strlen(MODE_RELEASED);
+unsigned int MODE_PRESSED_LEN = strlen(MODE_PRESSED);
+
+unsigned int USER_RELEASED_LEN = strlen(USER_RELEASED);
+unsigned int USER_PRESSED_LEN = strlen(USER_PRESSED);
+
 char* LED1ON = "LED1ON";
 char* LED1OFF = "LED1OFF";
 char* LED1TOG = "LED1TOG";
-
-char* USER_PRESSED = "USER_PRESSED\r\n";
-char* USER_RELEASED = "USER_RELEASED\r\n";
 
 char* LED2ON = "LED2ON";
 char* LED2OFF = "LED2OFF";
@@ -204,22 +213,8 @@ int rxi = 0;
 int txmin = 0, txmax = 0;
 
 
-/*
-for(;;)
-	if (niepusty tx buf ^ txne == 1)
-		send byte from tx buf;
-	if (rxe == 1)
-		receive byte and save it in rx buffer
-	if (key pressed of released)
-		put msg to tx buf
-	if (rx buf contains command)
-		turn led on/off
-*/
-
 int mode_was_enabled = 0; // poporzednio zaobserwowany stan
 int user_was_enabled = 0;
-
-int printed = 0; // DEBUG
 
 int blue_enabled = 0;
 
@@ -235,16 +230,15 @@ for(;;) {
 	if(mozna_odebrac()) {
 		rxbuf[rxi] = odbierz();
 		rxi++;
-		printed = 0;
 	}
 	if(mode_but_changed_state(mode_was_enabled)) {
 		char* dest = txbuf + txmax;
 		if (mode_was_enabled) {
 			strcpy(dest, MODE_RELEASED);
-			txmax += strlen(MODE_RELEASED);
+			txmax += MODE_RELEASED_LEN;
 		} else {
 			strcpy(dest, MODE_PRESSED);
-			txmax += strlen(MODE_PRESSED);
+			txmax += MODE_PRESSED_LEN;
 		}
 		mode_was_enabled = 1 - mode_was_enabled; // change recently observed state
 	}
@@ -252,10 +246,10 @@ for(;;) {
 		char* dest = txbuf + txmax;
 		if (user_was_enabled) {
 			strcpy(dest, USER_RELEASED);
-			txmax += strlen(USER_RELEASED);
+			txmax += USER_RELEASED_LEN;
 		} else {
 			strcpy(dest, USER_PRESSED);
-			txmax += strlen(USER_PRESSED);
+			txmax += USER_PRESSED_LEN;
 		}
 		user_was_enabled = 1 - user_was_enabled; // change recently observed state
 	}
