@@ -230,11 +230,12 @@ for(;;) {
 	if(mode_but_changed_state(mode_was_enabled)) {
 		mode_was_enabled = 1 - mode_was_enabled;
 		// TODO wyslij KEY_PRESSED
-		char* dest = tx_buf + txi;
+		char* dest = txbuf + txi;
 		strcpy(dest, MODE_PRESSED);
 		txi += strlen(MODE_PRESSED);
 	}
-	rxbuf[rxi] = '\0'
+
+	rxbuf[rxi] = '\0';
 	if (0 == strcmp(LED1ON, rxbuf)) {
 		BlueLEDon();
 		rxi = 0;
