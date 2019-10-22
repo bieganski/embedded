@@ -190,6 +190,7 @@ char* MODE_RELEASED = "MODE_RELEASED\r\n";
 
 char* LED1ON = "LED1ON";
 char* LED1OFF = "LED1OFF";
+char* LED1TOG = "LED1TOG";
 
 char* USER_PRESSED = "USER_PRESSED\r\n";
 char* USER_RELEASED = "USER_RELEASED\r\n";
@@ -219,6 +220,8 @@ int mode_was_enabled = 0; // poporzednio zaobserwowany stan
 int user_was_enabled = 0;
 
 int printed = 0; // DEBUG
+
+int blue_enabled = 0;
 
 for(;;) {
 	if (txmin == txmax) {
@@ -261,9 +264,11 @@ for(;;) {
 	rxbuf[rxi] = '\0';
 	if (0 == strcmp(LED1ON, rxbuf)) {
 		BlueLEDon();
+		blue_enabled = 1;
 		rxi = 0;
 	} else if (0 == strcmp(LED1OFF, rxbuf)) {
 		BlueLEDoff();
+		blue_enabled = 0;
 		rxi = 0;
 	} else if (0 == strcmp(LED2ON, rxbuf)) {
 		Green2LEDon();
@@ -271,15 +276,13 @@ for(;;) {
 	} else if (0 == strcmp(LED2OFF, rxbuf)) {
 		Green2LEDoff();
 		rxi = 0;
-	} else if (0) {
-		// DEBUG
-		strcpy(txbuf + txmax, rxbuf);
-		txmax += strlen(rxbuf);
-		txbuf[txmax] = '\r';
-		txbuf[txmax + 1] = '\n';
-		txbuf[txmax + 2] = '\0';
-		txmax += 2;
-		printed = 1;
+	} else if (0 == strcmp(LED1TOG, rxbuf)) {
+		if (blue_enabled)
+			BlueLEDoff();
+		else
+			BlueLEDon();
+		blue_enabled = 1 - blue_enabled;
+		rxi = 0;
 	}
 } // for(;;)
 
