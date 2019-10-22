@@ -100,7 +100,13 @@ char odbierz() {
 }
 
 
-int mode_but_changed_state(int was_enabled);
+
+
+int mode_but_changed_state(int was_enabled) {
+	int one = (!was_enabled) && mode_but_enabled();
+	int two = was_enabled && (!mode_but_enabled());
+	return one || two;
+}
 
 int main() {
 
@@ -186,14 +192,16 @@ char c = 'a';
 char txbuf[120];
 char rxbuf[20];
 
-char* MODE_PRESSED = "MODE_PRESSED";
-char* MODE_RELEASED = "MODE_RELEASED";
+char* MODE_PRESSED = "MODE_PRESSED\r\n";
+char* MODE_RELEASED = "MODE_RELEASED\r\n";
 
 char* LED1ON = "LED1ON";
 char* LED1OFF = "LED1OFF";
 
 
 int txi = 0, rxi = 0;
+
+int txmin = 0, txmax = 0;
 
 if(mozna_odebrac()) {
 	RedLEDon();
@@ -219,20 +227,24 @@ for(;;)
 int mode_was_enabled = 0; // poporzednio zaobserwowany stan
 
 for(;;) {
-	if(txi > 0 && mozna_wyslac()) {
-		wyslij(txbuf[txi]);
-		txi--;
+	if(txmax > 0 && mozna_wyslac()) {
+		wyslij(txbuf[txmin]);
+		txmin++;
 	}
 	if(mozna_odebrac()) {
 		rxbuf[rxi] = odbierz();
-		rxi--;
+		rxi++;
 	}
 	if(mode_but_changed_state(mode_was_enabled)) {
-		mode_was_enabled = 1 - mode_was_enabled;
-		// TODO wyslij KEY_PRESSED
-		char* dest = txbuf + txi;
-		strcpy(dest, MODE_PRESSED);
-		txi += strlen(MODE_PRESSED);
+		char* dest = txbuf + txmax;
+		if (mode_was_enabled) {
+			strcpy(dest, MODE_RELEASED);
+			txmax += strlen(MODE_RELEASED);
+		} else {
+			strcpy(dest, MODE_PRESSED);
+			txmax += strlen(MODE_PRESSED);
+		}
+		mode_was_enabled = 1 - mode_was_enabled; // change recently observed state
 	}
 
 	rxbuf[rxi] = '\0';
@@ -243,24 +255,7 @@ for(;;) {
 		BlueLEDoff();
 		rxi = 0;
 	}
-}
+} // for(;;)
 
-    for (;;) {
-		if(mozna_odebrac()) {
-			BlueLEDon();
-			odbierz();
-		}
+} // main
 
-		//if (user_but_enabled()) {
-		    //RedLEDon();
-		//}
-    }
-
-}
-
-
-int mode_but_changed_state(int was_enabled) {
-	int one = (!was_enabled) && mode_buf_enabled();
-	int two = was_enabled && (!mode_buf_enabled());
-	return one || two;
-}

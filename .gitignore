@@ -1,0 +1,7 @@
+delay.o
+gpio.o
+leds.bin
+leds.elf
+leds_main.o
+startup_stm32.o
+
