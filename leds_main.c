@@ -149,7 +149,6 @@ void DMA1_Stream5_IRQHandler() {
 
 
 void DMAconfig() {
-	// NOWE
 	GPIOafConfigure(GPIOA,
 	2,
 	GPIO_OType_PP,
@@ -168,10 +167,15 @@ void DMAconfig() {
 
 void LedsConfig() {
 
+	RedLEDoff();
+	GreenLEDoff();
+	BlueLEDoff();
+	Green2LEDoff();
+
 	GPIOoutConfigure(RED_LED_GPIO,
 	RED_LED_PIN,
 	GPIO_OType_PP,
-	GPIO_Low_Speed,
+	GPIO_Low_Speed,	
 	GPIO_PuPd_NOPULL);
 
 	GPIOoutConfigure(GREEN_LED_GPIO,
@@ -194,37 +198,66 @@ void LedsConfig() {
 
 }
 
-void EXTIConfig() {
-	GPIOinConfigure(GPIOC, 13, GPIO_PuPd_UP,
-	EXTI_Mode_Interrupt,
-	EXTI_Trigger_Falling);
+
+#define USER_INT_PRIO LOW_IRQ_PRIO
+#define USER_INT_SUBPRIO LOW_IRQ_SUBPRIO
+void UserButInterruptPrioritiesSetup() {
+	IRQsetPriority(EXTI15_10_IRQn, USER_INT_PRIO, USER_INT_SUBPRIO);
 }
 
+void UserButInterruptEXTIConfig() {
+
+	GPIOinConfigure(GPIOC, 
+	USER_BUT_PIN, // 13
+	GPIO_PuPd_NOPULL,
+	EXTI_Mode_Interrupt,
+	EXTI_Trigger_Falling);
+
+
+	EXTI->PR = 1 << USER_BUT_PIN; // zerowanie rejestru
+}
+
+void EXTI15_10_IRQHandler(void) {
+	EXTI->PR = EXTI_PR_PR13;
+/* Tu wstaw kod obsługujący przerwanie. */
+	BlueLEDon();
+}
+
+
 int main() {
-// NOWE: włączenie PA, DMA
-RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN |
-RCC_AHB1ENR_DMA1EN;
-RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+
+	// NOWE: włączenie PA, DMA
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOCEN | RCC_AHB1ENR_GPIOBEN |  
+	RCC_AHB1ENR_DMA1EN;
+	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+
+	// Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
 
-    __NOP();
+	    __NOP();
 
 
-DMAconfig();
 
-LedsConfig();
+	//DMAconfig();
 
-EXTIConfig();
+	LedsConfig();
 
-uint32_t const baudrate = 9600U;
+	UserButInterruptEXTIConfig();
 
-// USART
-USART2->CR1 = USART_CR1_RE | USART_CR1_TE;
-USART2->CR2 = 0;
-USART2->BRR = (PCLK1_HZ + (baudrate / 2U)) / baudrate;
+	// UserButInterruptPrioritiesSetup();
 
-// DMA
-USART2->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
+	NVIC_EnableIRQ(EXTI15_10_IRQn);
+
+	for(;;);
+	uint32_t const baudrate = 9600U;
+	// USART
+	USART2->CR1 = USART_CR1_RE | USART_CR1_TE;
+	USART2->CR2 = 0;
+	USART2->BRR = (PCLK1_HZ + (baudrate / 2U)) / baudrate;
+
+	// DMA
+	USART2->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
 
 
 /*
@@ -283,10 +316,7 @@ DMA1_Stream5->CR |= DMA_SxCR_EN;
 */
 
 
-RedLEDoff();
-GreenLEDoff();
-BlueLEDoff();
-Green2LEDoff();
+
 
 unsigned int BUFSIZE = 8000;
 
@@ -323,6 +353,17 @@ int mode_was_enabled = 0; // poporzednio zaobserwowany stan
 int user_was_enabled = 0;
 
 int blue_enabled = 0;
+
+for(;;);
+
+
+
+//
+// DALEJ NA RAZIE NIC NIE MA
+//
+
+
+
 /*
 for(;;) {
 	if (txmin == txmax) {
@@ -387,7 +428,7 @@ for(;;) {
 } // for(;;)
 */
 
-
+/*
 DMA1_Stream6->M0AR = (uint32_t)LED2ON;
 DMA1_Stream6->NDTR = 4;
 DMA1_Stream6->CR |= DMA_SxCR_EN;
@@ -396,7 +437,7 @@ char RES[5];
 DMA1_Stream5->M0AR = (uint32_t)RES;
 DMA1_Stream5->NDTR = 1;
 DMA1_Stream5->CR |= DMA_SxCR_EN;
-
+*/
 
 for(;;);
 
