@@ -4,6 +4,7 @@
 #include <string.h>
 
 
+#include <irq.h>
 
 #define RED_LED_GPIO GPIOA
 #define GREEN_LED_GPIO GPIOA
@@ -100,87 +101,192 @@ char odbierz() {
 }
 
 
+int mode_but_changed_state(int was_enabled) {
+	int one = (!was_enabled) && mode_but_enabled();
+	int two = was_enabled && (!mode_but_enabled());
+	return one || two;
+}
 
-int mode_but_changed_state(int was_enabled);
-int user_but_changed_state(int was_enabled);
+int user_but_changed_state(int was_enabled) {
+	int one = (!was_enabled) && user_but_enabled();
+	int two = was_enabled && (!user_but_enabled());
+	return one || two;
+}
+
+
+
+// HANDLER PRZERWANIA PO WYSŁANIU
+void DMA1_Stream6_IRQHandler() {
+	/* Odczytaj zgłoszone przerwania DMA1. */
+	uint32_t isr = DMA1->HISR;
+	if (isr & DMA_HISR_TCIF6) {
+		/* Obsłuż zakończenie transferu
+		w strumieniu 6. */
+		DMA1->HIFCR = DMA_HIFCR_CTCIF6;
+
+		RedLEDon();
+	}
+// Uwaga: zakończenie transferu DMA nie oznacza, że UART
+// zakończył wysyłanie
+}
+
+
+void DMA1_Stream5_IRQHandler() {
+	/* Odczytaj zgłoszone przerwania DMA1. */
+	uint32_t isr = DMA1->HISR;
+
+	if (isr & DMA_HISR_TCIF5) {
+		/* Obsłuż zakończenie transferu
+		w strumieniu 5. */
+		DMA1->HIFCR = DMA_HIFCR_CTCIF5;
+		RedLEDoff();
+		BlueLEDon();
+		Green2LEDon();
+	/* Ponownie uaktywnij odbieranie. */
+	}
+
+}
+
+
+void DMAconfig() {
+	// NOWE
+	GPIOafConfigure(GPIOA,
+	2,
+	GPIO_OType_PP,
+	GPIO_Fast_Speed,
+	GPIO_PuPd_NOPULL,
+	GPIO_AF_USART2);
+
+	GPIOafConfigure(GPIOA,
+	3,
+	GPIO_OType_PP,
+	GPIO_Fast_Speed,
+	GPIO_PuPd_UP,
+	GPIO_AF_USART2);
+}
+
+
+void LedsConfig() {
+
+	GPIOoutConfigure(RED_LED_GPIO,
+	RED_LED_PIN,
+	GPIO_OType_PP,
+	GPIO_Low_Speed,
+	GPIO_PuPd_NOPULL);
+
+	GPIOoutConfigure(GREEN_LED_GPIO,
+	GREEN_LED_PIN,
+	GPIO_OType_PP,
+	GPIO_Low_Speed,
+	GPIO_PuPd_NOPULL);
+
+	GPIOoutConfigure(BLUE_LED_GPIO,
+	BLUE_LED_PIN,
+	GPIO_OType_PP,
+	GPIO_Low_Speed,
+	GPIO_PuPd_NOPULL);
+
+	GPIOoutConfigure(GREEN2_LED_GPIO,
+	GREEN2_LED_PIN,
+	GPIO_OType_PP,
+	GPIO_Low_Speed,
+	GPIO_PuPd_NOPULL);
+
+}
+
+void EXTIConfig() {
+	GPIOinConfigure(GPIOC, 13, GPIO_PuPd_UP,
+	EXTI_Mode_Interrupt,
+	EXTI_Trigger_Falling);
+}
 
 int main() {
-
-// Włączenie taktowania portów PA i PB (układy GPIOA i GPIOB)
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN |
-    RCC_AHB1ENR_GPIOBEN | RCC_AHB1ENR_GPIOCEN;
-
-	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
-
+// NOWE: włączenie PA, DMA
+RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN |
+RCC_AHB1ENR_DMA1EN;
+RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
 
     __NOP();
 
 
+DMAconfig();
 
-//  Konfigurujemy linię TXD
-GPIOafConfigure(GPIOA,
-2,
-GPIO_OType_PP,
-GPIO_Fast_Speed,
-GPIO_PuPd_NOPULL,
-GPIO_AF_USART2);
-// Konfigurujemy linię RXD
-GPIOafConfigure(GPIOA,
-3,
-GPIO_OType_PP,
-GPIO_Fast_Speed,
-GPIO_PuPd_UP,
-GPIO_AF_USART2);
+LedsConfig();
 
-
-
-GPIOoutConfigure(RED_LED_GPIO,
-RED_LED_PIN,
-GPIO_OType_PP,
-GPIO_Low_Speed,
-GPIO_PuPd_NOPULL);
-
-GPIOoutConfigure(GREEN_LED_GPIO,
-GREEN_LED_PIN,
-GPIO_OType_PP,
-GPIO_Low_Speed,
-GPIO_PuPd_NOPULL);
-
-GPIOoutConfigure(BLUE_LED_GPIO,
-BLUE_LED_PIN,
-GPIO_OType_PP,
-GPIO_Low_Speed,
-GPIO_PuPd_NOPULL);
-
-GPIOoutConfigure(GREEN2_LED_GPIO,
-GREEN2_LED_PIN,
-GPIO_OType_PP,
-GPIO_Low_Speed,
-GPIO_PuPd_NOPULL);
-
-
-USART2->CR1 = USART_Mode_Rx_Tx |
-	USART_WordLength_8b |
-	USART_Parity_No;
-USART2->CR2 = USART_StopBits_1;
-USART2->CR3 = USART_FlowControl_None;
+EXTIConfig();
 
 uint32_t const baudrate = 9600U;
-USART2->BRR = (PCLK1_HZ + (baudrate / 2U)) /
-baudrate;
+
+// USART
+USART2->CR1 = USART_CR1_RE | USART_CR1_TE;
+USART2->CR2 = 0;
+USART2->BRR = (PCLK1_HZ + (baudrate / 2U)) / baudrate;
+
+// DMA
+USART2->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
 
 
+/*
+USART2 TX korzysta ze strumienia 6 i kanału 4, tryb
+bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
+adresu pamięci po każdym przesłaniu, przerwanie po
+zakończeniu transmisji
+*/
+DMA1_Stream6->CR = 4U << 25 |
+DMA_SxCR_PL_1 |
+DMA_SxCR_MINC |
+DMA_SxCR_DIR_0 |
+DMA_SxCR_TCIE;
+
+// Adres układu peryferyjnego nie zmienia się
+DMA1_Stream6->PAR = (uint32_t)&USART2->DR;
+
+/*
+USART2 RX korzysta ze strumienia 5 i kanału 4, tryb
+bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
+adresu pamięci po każdym przesłaniu, przerwanie po
+zakończeniu transmisji
+*/
+DMA1_Stream5->CR = 4U << 25 |
+DMA_SxCR_PL_1 |
+DMA_SxCR_MINC |
+DMA_SxCR_TCIE;
+
+// Adres ukladu per. sie nie zmienia
+DMA1_Stream5->PAR = (uint32_t)&USART2->DR;
+
+
+// Wyczyść znaczniki przerwań i włącz przerwania
+DMA1->HIFCR = DMA_HIFCR_CTCIF6 |
+DMA_HIFCR_CTCIF5;
+NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+NVIC_EnableIRQ(DMA1_Stream5_IRQn);
 
 
 // ENABLE
-USART2->CR1 |= USART_Enable;
+USART2->CR1 |= USART_CR1_UE;
 
 
-    RedLEDoff();
-    GreenLEDoff();
-    BlueLEDoff();
-    Green2LEDoff();
+/*
+Inicjowanie wysyłania:
+DMA1_Stream6->M0AR = (uint32_t)buff;
+DMA1_Stream6->NDTR = len;
+DMA1_Stream6->CR |= DMA_SxCR_EN;
+
+
+Inicjowanie odbierania:
+DMA1_Stream5->M0AR = (uint32_t)buff;
+DMA1_Stream5->NDTR = 1;
+DMA1_Stream5->CR |= DMA_SxCR_EN;
+
+*/
+
+
+RedLEDoff();
+GreenLEDoff();
+BlueLEDoff();
+Green2LEDoff();
 
 unsigned int BUFSIZE = 8000;
 
@@ -217,7 +323,7 @@ int mode_was_enabled = 0; // poporzednio zaobserwowany stan
 int user_was_enabled = 0;
 
 int blue_enabled = 0;
-
+/*
 for(;;) {
 	if (txmin == txmax) {
 		txmin = 0;
@@ -279,17 +385,23 @@ for(;;) {
 		rxi = 0;
 	}
 } // for(;;)
+*/
+
+
+DMA1_Stream6->M0AR = (uint32_t)LED2ON;
+DMA1_Stream6->NDTR = 4;
+DMA1_Stream6->CR |= DMA_SxCR_EN;
+
+char RES[5];
+DMA1_Stream5->M0AR = (uint32_t)RES;
+DMA1_Stream5->NDTR = 1;
+DMA1_Stream5->CR |= DMA_SxCR_EN;
+
+
+for(;;);
 
 } // main
 
-int mode_but_changed_state(int was_enabled) {
-	int one = (!was_enabled) && mode_but_enabled();
-	int two = was_enabled && (!mode_but_enabled());
-	return one || two;
-}
 
-int user_but_changed_state(int was_enabled) {
-	int one = (!was_enabled) && user_but_enabled();
-	int two = was_enabled && (!user_but_enabled());
-	return one || two;
-}
+
+
