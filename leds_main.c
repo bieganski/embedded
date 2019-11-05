@@ -114,6 +114,11 @@ int user_but_changed_state(int was_enabled) {
 }
 
 
+uint32_t QUE_IDX_MIN = 0;
+uint32_t QUE_IDX_MAX = 0;
+#define QUE_SIZE 127
+char* QUEUE[QUE_SIZE];
+
 
 // HANDLER PRZERWANIA PO WYSŁANIU
 void DMA1_Stream6_IRQHandler() {
@@ -124,10 +129,10 @@ void DMA1_Stream6_IRQHandler() {
 		w strumieniu 6. */
 		DMA1->HIFCR = DMA_HIFCR_CTCIF6;
 
-		RedLEDon();
+        /* Jeśli jest coś do wysłania,
+            wystartuj kolejną transmisję. */
+        send();
 	}
-// Uwaga: zakończenie transferu DMA nie oznacza, że UART
-// zakończył wysyłanie
 }
 
 
@@ -207,50 +212,80 @@ void UserButInterruptPrioritiesSetup() {
 
 void UserButInterruptEXTIConfig() {
 
-	GPIOinConfigure(GPIOC, 
-	USER_BUT_PIN, // 13
+	GPIOinConfigure(USER_BUT_GPIO, 
+	USER_BUT_PIN,
 	GPIO_PuPd_NOPULL,
 	EXTI_Mode_Interrupt,
 	EXTI_Trigger_Falling);
 
 
-	EXTI->PR = 1 << USER_BUT_PIN; // zerowanie rejestru
+	EXTI->PR = 1 << USER_BUT_PIN;
+}
+
+void ModeButInterruptEXTIConfig() {
+	GPIOinConfigure(MODE_BUT_GPIO, 
+	MODE_BUT_PIN,
+	GPIO_PuPd_NOPULL,
+	EXTI_Mode_Interrupt,
+	EXTI_Trigger_Falling);
+
+	EXTI->PR = 1 << MODE_BUT_PIN;
+}
+
+void send() {
+    if (QUE_IDX_MAX == QUE_IDX_MIN)
+            return; // nie ma nic do wysłania
+    uint32_t idx = QUE_IDX_MIN % QUE_SIZE;
+    if (QUEUE[idx] != NULL) {
+        DMA1_Stream6->M0AR = (uint32_t)QUEUE[idx];
+        DMA1_Stream6->NDTR = strlen(QUEUE[idx]); // TODO sizeof zadziała?
+        DMA1_Stream6->CR |= DMA_SxCR_EN;
+        QUE_IDX_MIN++;
+    }
+}
+
+void send_or_enqueue(char* text) {
+    uint32_t idx = QUE_IDX_MAX % QUE_SIZE;
+    QUEUE[idx] = text;
+    QUE_IDX_MAX++;
+    
+    if ((DMA1_Stream6->CR & DMA_SxCR_EN) == 0 &&
+        (DMA1->HISR & DMA_HISR_TCIF6) == 0) {
+        send();
+    } else {
+        // nie można wysłać bo DMA zajęte
+        return;
+    }
+}
+
+void EXTI0_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR0;
+    
+    char MODE_FIRED[] = "MODE FIRED\r\n";
+    char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
+    
+    send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
 }
 
 void EXTI15_10_IRQHandler(void) {
 	EXTI->PR = EXTI_PR_PR13;
-/* Tu wstaw kod obsługujący przerwanie. */
-	BlueLEDon();
+    /* Tu wstaw kod obsługujący przerwanie. */
+
+    char USER_FIRED[] = "USER FIRED\r\n";
+    char USER_UNFIRED[] = "USER UNFIRED\r\n";
+    
+
+    /*
+    int user_but_enabled() {
+        return ( USER_BUT_GPIO->IDR & (1 << USER_BUT_PIN) ) == 0;
+    }
+    */
+    send_or_enqueue(user_but_enabled() ? USER_FIRED : USER_UNFIRED);
 }
 
 
-int main() {
-
-	// NOWE: włączenie PA, DMA
-	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOCEN | RCC_AHB1ENR_GPIOBEN |  
-	RCC_AHB1ENR_DMA1EN;
-	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
-
-	// Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
-	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
-
-
-	    __NOP();
-
-
-
-	//DMAconfig();
-
-	LedsConfig();
-
-	UserButInterruptEXTIConfig();
-
-	// UserButInterruptPrioritiesSetup();
-
-	NVIC_EnableIRQ(EXTI15_10_IRQn);
-
-	for(;;);
-	uint32_t const baudrate = 9600U;
+void DMA_USART_config() {
+uint32_t const baudrate = 9600U;
 	// USART
 	USART2->CR1 = USART_CR1_RE | USART_CR1_TE;
 	USART2->CR2 = 0;
@@ -260,186 +295,70 @@ int main() {
 	USART2->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
 
 
-/*
-USART2 TX korzysta ze strumienia 6 i kanału 4, tryb
-bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
-adresu pamięci po każdym przesłaniu, przerwanie po
-zakończeniu transmisji
-*/
-DMA1_Stream6->CR = 4U << 25 |
-DMA_SxCR_PL_1 |
-DMA_SxCR_MINC |
-DMA_SxCR_DIR_0 |
-DMA_SxCR_TCIE;
+    /*
+    USART2 TX korzysta ze strumienia 6 i kanału 4, tryb
+    bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
+    adresu pamięci po każdym przesłaniu, przerwanie po
+    zakończeniu transmisji
+    */
+    DMA1_Stream6->CR = 4U << 25 |
+    DMA_SxCR_PL_1 |
+    DMA_SxCR_MINC |
+    DMA_SxCR_DIR_0 |
+    DMA_SxCR_TCIE;
 
-// Adres układu peryferyjnego nie zmienia się
-DMA1_Stream6->PAR = (uint32_t)&USART2->DR;
+    // Adres układu peryferyjnego nie zmienia się
+    DMA1_Stream6->PAR = (uint32_t)&USART2->DR;
 
-/*
-USART2 RX korzysta ze strumienia 5 i kanału 4, tryb
-bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
-adresu pamięci po każdym przesłaniu, przerwanie po
-zakończeniu transmisji
-*/
-DMA1_Stream5->CR = 4U << 25 |
-DMA_SxCR_PL_1 |
-DMA_SxCR_MINC |
-DMA_SxCR_TCIE;
+    /*
+    USART2 RX korzysta ze strumienia 5 i kanału 4, tryb
+    bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
+    adresu pamięci po każdym przesłaniu, przerwanie po
+    zakończeniu transmisji
+    */
+    DMA1_Stream5->CR = 4U << 25 |
+    DMA_SxCR_PL_1 |
+    DMA_SxCR_MINC |
+    DMA_SxCR_TCIE;
 
-// Adres ukladu per. sie nie zmienia
-DMA1_Stream5->PAR = (uint32_t)&USART2->DR;
-
-
-// Wyczyść znaczniki przerwań i włącz przerwania
-DMA1->HIFCR = DMA_HIFCR_CTCIF6 |
-DMA_HIFCR_CTCIF5;
-NVIC_EnableIRQ(DMA1_Stream6_IRQn);
-NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+    // Adres ukladu per. sie nie zmienia
+    DMA1_Stream5->PAR = (uint32_t)&USART2->DR;
 
 
-// ENABLE
-USART2->CR1 |= USART_CR1_UE;
+    // Wyczyść znaczniki przerwań i włącz przerwania
+    DMA1->HIFCR = DMA_HIFCR_CTCIF6 |
+    DMA_HIFCR_CTCIF5;
+    NVIC_EnableIRQ(DMA1_Stream6_IRQn);
+    NVIC_EnableIRQ(DMA1_Stream5_IRQn);
 
 
-/*
-Inicjowanie wysyłania:
-DMA1_Stream6->M0AR = (uint32_t)buff;
-DMA1_Stream6->NDTR = len;
-DMA1_Stream6->CR |= DMA_SxCR_EN;
+    // ENABLE
+    USART2->CR1 |= USART_CR1_UE;
+    
+}
+
+int main() {
+    // Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
+	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    
+	// włączenie GPIO, DMA, USART
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOCEN | RCC_AHB1ENR_GPIOBEN |  
+	RCC_AHB1ENR_DMA1EN;
+	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+
+    __NOP();
 
 
-Inicjowanie odbierania:
-DMA1_Stream5->M0AR = (uint32_t)buff;
-DMA1_Stream5->NDTR = 1;
-DMA1_Stream5->CR |= DMA_SxCR_EN;
-
-*/
-
-
-
-
-unsigned int BUFSIZE = 8000;
-
-char txbuf[BUFSIZE];
-char rxbuf[BUFSIZE];
-
-char* MODE_PRESSED = "MODE_PRESSED\r\n";
-char* MODE_RELEASED = "MODE_RELEASED\r\n";
-
-char* USER_PRESSED = "USER_PRESSED\r\n";
-char* USER_RELEASED = "USER_RELEASED\r\n";
+	DMAconfig();
+	LedsConfig();
+	UserButInterruptEXTIConfig();
+    ModeButInterruptEXTIConfig();
+    DMA_USART_config();
+	NVIC_EnableIRQ(EXTI15_10_IRQn);
+    NVIC_EnableIRQ(EXTI0_IRQn);
 
 
-unsigned int MODE_RELEASED_LEN = strlen(MODE_RELEASED);
-unsigned int MODE_PRESSED_LEN = strlen(MODE_PRESSED);
-
-unsigned int USER_RELEASED_LEN = strlen(USER_RELEASED);
-unsigned int USER_PRESSED_LEN = strlen(USER_PRESSED);
-
-char* LED1ON = "LED1ON";
-char* LED1OFF = "LED1OFF";
-char* LED1TOG = "LED1TOG";
-
-char* LED2ON = "LED2ON";
-char* LED2OFF = "LED2OFF";
-
-
-int rxi = 0;
-
-int txmin = 0, txmax = 0;
-
-
-int mode_was_enabled = 0; // poporzednio zaobserwowany stan
-int user_was_enabled = 0;
-
-int blue_enabled = 0;
-
-for(;;);
-
-
-
-//
-// DALEJ NA RAZIE NIC NIE MA
-//
-
-
-
-/*
-for(;;) {
-	if (txmin == txmax) {
-		txmin = 0;
-		txmax = 0;
-	}
-	if(txmax > 0 && mozna_wyslac()) {
-		wyslij(txbuf[txmin]);
-		txmin++;
-	}
-	if(mozna_odebrac()) {
-		rxbuf[rxi] = odbierz();
-		rxi++;
-	}
-	if(mode_but_changed_state(mode_was_enabled)) {
-		char* dest = txbuf + txmax;
-		if (mode_was_enabled) {
-			strcpy(dest, MODE_RELEASED);
-			txmax += MODE_RELEASED_LEN;
-		} else {
-			strcpy(dest, MODE_PRESSED);
-			txmax += MODE_PRESSED_LEN;
-		}
-		mode_was_enabled = 1 - mode_was_enabled; // change recently observed state
-	}
-	if(user_but_changed_state(user_was_enabled)) {
-		char* dest = txbuf + txmax;
-		if (user_was_enabled) {
-			strcpy(dest, USER_RELEASED);
-			txmax += USER_RELEASED_LEN;
-		} else {
-			strcpy(dest, USER_PRESSED);
-			txmax += USER_PRESSED_LEN;
-		}
-		user_was_enabled = 1 - user_was_enabled; // change recently observed state
-	}
-
-
-	rxbuf[rxi] = '\0';
-	if (0 == strcmp(LED1ON, rxbuf)) {
-		BlueLEDon();
-		blue_enabled = 1;
-		rxi = 0;
-	} else if (0 == strcmp(LED1OFF, rxbuf)) {
-		BlueLEDoff();
-		blue_enabled = 0;
-		rxi = 0;
-	} else if (0 == strcmp(LED2ON, rxbuf)) {
-		Green2LEDon();
-		rxi = 0;
-	} else if (0 == strcmp(LED2OFF, rxbuf)) {
-		Green2LEDoff();
-		rxi = 0;
-	} else if (0 == strcmp(LED1TOG, rxbuf)) {
-		if (blue_enabled)
-			BlueLEDoff();
-		else
-			BlueLEDon();
-		blue_enabled = 1 - blue_enabled;
-		rxi = 0;
-	}
-} // for(;;)
-*/
-
-/*
-DMA1_Stream6->M0AR = (uint32_t)LED2ON;
-DMA1_Stream6->NDTR = 4;
-DMA1_Stream6->CR |= DMA_SxCR_EN;
-
-char RES[5];
-DMA1_Stream5->M0AR = (uint32_t)RES;
-DMA1_Stream5->NDTR = 1;
-DMA1_Stream5->CR |= DMA_SxCR_EN;
-*/
-
-for(;;);
+    for(;;);
 
 } // main
 
