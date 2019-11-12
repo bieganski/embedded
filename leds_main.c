@@ -3,7 +3,6 @@
 #include <stm32.h>
 #include <string.h>
 
-
 #include <irq.h>
 
 #define RED_LED_GPIO GPIOA
@@ -83,76 +82,6 @@ int user_but_enabled() {
 #define PCLK1_HZ HSI_HZ
 
 
-
-int mozna_wyslac() {
-	return USART2->SR & USART_SR_TXE;
-}
-
-void wyslij(char c) {
-	USART2->DR = c;
-}
-
-int mozna_odebrac() {
-	return USART2->SR & USART_SR_RXNE;
-}
-
-char odbierz() {
-	return USART2->DR;
-}
-
-
-int mode_but_changed_state(int was_enabled) {
-	int one = (!was_enabled) && mode_but_enabled();
-	int two = was_enabled && (!mode_but_enabled());
-	return one || two;
-}
-
-int user_but_changed_state(int was_enabled) {
-	int one = (!was_enabled) && user_but_enabled();
-	int two = was_enabled && (!user_but_enabled());
-	return one || two;
-}
-
-
-uint32_t QUE_IDX_MIN = 0;
-uint32_t QUE_IDX_MAX = 0;
-#define QUE_SIZE 127
-char* QUEUE[QUE_SIZE];
-
-
-// HANDLER PRZERWANIA PO WYSŁANIU
-void DMA1_Stream6_IRQHandler() {
-	/* Odczytaj zgłoszone przerwania DMA1. */
-	uint32_t isr = DMA1->HISR;
-	if (isr & DMA_HISR_TCIF6) {
-		/* Obsłuż zakończenie transferu
-		w strumieniu 6. */
-		DMA1->HIFCR = DMA_HIFCR_CTCIF6;
-
-        /* Jeśli jest coś do wysłania,
-            wystartuj kolejną transmisję. */
-        send();
-	}
-}
-
-
-void DMA1_Stream5_IRQHandler() {
-	/* Odczytaj zgłoszone przerwania DMA1. */
-	uint32_t isr = DMA1->HISR;
-
-	if (isr & DMA_HISR_TCIF5) {
-		/* Obsłuż zakończenie transferu
-		w strumieniu 5. */
-		DMA1->HIFCR = DMA_HIFCR_CTCIF5;
-		RedLEDoff();
-		BlueLEDon();
-		Green2LEDon();
-	/* Ponownie uaktywnij odbieranie. */
-	}
-
-}
-
-
 void DMAconfig() {
 	GPIOafConfigure(GPIOA,
 	2,
@@ -216,7 +145,7 @@ void UserButInterruptEXTIConfig() {
 	USER_BUT_PIN,
 	GPIO_PuPd_NOPULL,
 	EXTI_Mode_Interrupt,
-	EXTI_Trigger_Falling);
+	EXTI_Trigger_Rising_Falling);
 
 
 	EXTI->PR = 1 << USER_BUT_PIN;
@@ -227,18 +156,24 @@ void ModeButInterruptEXTIConfig() {
 	MODE_BUT_PIN,
 	GPIO_PuPd_NOPULL,
 	EXTI_Mode_Interrupt,
-	EXTI_Trigger_Falling);
+	EXTI_Trigger_Rising_Falling);
 
 	EXTI->PR = 1 << MODE_BUT_PIN;
 }
 
+uint32_t QUE_IDX_MIN = 0;
+uint32_t QUE_IDX_MAX = 0;
+#define QUE_SIZE 127
+char* QUEUE[QUE_SIZE];
+
+
 void send() {
     if (QUE_IDX_MAX == QUE_IDX_MIN)
-            return; // nie ma nic do wysłania
+        return; // nie ma nic do wysłania
     uint32_t idx = QUE_IDX_MIN % QUE_SIZE;
     if (QUEUE[idx] != NULL) {
         DMA1_Stream6->M0AR = (uint32_t)QUEUE[idx];
-        DMA1_Stream6->NDTR = strlen(QUEUE[idx]); // TODO sizeof zadziała?
+        DMA1_Stream6->NDTR = strlen(QUEUE[idx]);
         DMA1_Stream6->CR |= DMA_SxCR_EN;
         QUE_IDX_MIN++;
     }
@@ -258,14 +193,41 @@ void send_or_enqueue(char* text) {
     }
 }
 
-void EXTI0_IRQHandler(void) {
-    EXTI->PR = EXTI_PR_PR0;
-    
-    char MODE_FIRED[] = "MODE FIRED\r\n";
-    char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
-    
-    send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
+// HANDLER PRZERWANIA PO WYSŁANIU
+void DMA1_Stream6_IRQHandler() {
+	/* Odczytaj zgłoszone przerwania DMA1. */
+	uint32_t isr = DMA1->HISR;
+	if (isr & DMA_HISR_TCIF6) {
+		/* Obsłuż zakończenie transferu
+		w strumieniu 6. */
+		DMA1->HIFCR = DMA_HIFCR_CTCIF6;
+
+        /* Jeśli jest coś do wysłania,
+            wystartuj kolejną transmisję. */
+        send();
+	}
 }
+
+
+void DMA1_Stream5_IRQHandler() {
+	/* Odczytaj zgłoszone przerwania DMA1. */
+	uint32_t isr = DMA1->HISR;
+
+	if (isr & DMA_HISR_TCIF5) {
+		/* Obsłuż zakończenie transferu
+		w strumieniu 5. */
+		DMA1->HIFCR = DMA_HIFCR_CTCIF5;
+		RedLEDoff();
+		BlueLEDon();
+		Green2LEDon();
+	/* Ponownie uaktywnij odbieranie. */
+	}
+
+}
+
+
+
+
 
 void EXTI15_10_IRQHandler(void) {
 	EXTI->PR = EXTI_PR_PR13;
@@ -337,6 +299,126 @@ uint32_t const baudrate = 9600U;
     
 }
 
+// PB8, PB9
+void i2c_config() {
+    
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
+    
+
+    GPIOafConfigure(GPIOB, 8, GPIO_OType_OD,
+    GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+    GPIO_AF_I2C1);
+    
+    GPIOafConfigure(GPIOB, 9, GPIO_OType_OD,
+    GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+    GPIO_AF_I2C1);
+    
+    
+    //  Konfiguruj szynę w wersji podstawowej
+    I2C1->CR1 = 0;
+    
+    // Konfiguruj częstotliwość taktowania szyny
+    #define I2C_SPEED_HZ 100000
+    #define PCLK1_MHZ 16
+    I2C1->CR2 = PCLK1_MHZ;
+    I2C1->CCR = (PCLK1_MHZ * 1000000) /
+    (I2C_SPEED_HZ << 1);
+    I2C1->TRISE = PCLK1_MHZ + 1;
+    
+    // Włącz szynę
+    I2C1->CR1 |= I2C_CR1_PE;
+}
+
+
+#define LIS35DE_ADDR 0x1C
+#define OUT_X 0x29
+#define OUT_Y 0x2B
+#define OUT_Z 0x2D
+
+
+#define wait(cond) while(!(cond));
+    
+
+// (master receive)
+char MR_receive() {
+    
+    // Zainicjuj transmisję sygnału START
+    I2C1->CR1 |= I2C_CR1_START;
+    
+    send_or_enqueue("dbg0");
+    
+    wait(I2C1->SR1 & I2C_SR1_SB);
+    // START wysłano
+    
+    send_or_enqueue("dbg1");
+    I2C1->DR = LIS35DE_ADDR << 1;
+    
+    wait(I2C1->SR1 & I2C_SR1_ADDR);
+    // ADRES wysłano
+    
+    send_or_enqueue("dbg2");
+    // skasuj bit ADDR
+    I2C1->SR2;
+    
+    // Zainicjuj wysyłanie 8-bitowego numeru rejestru slave’a
+    I2C1->DR = OUT_Y;
+    
+    wait(I2C1->SR1 & I2C_SR1_BTF);
+    // dane wysłano (numer rejestru slave'a)
+    
+    send_or_enqueue("dbg3");
+    
+    // Zainicjuj transmisję sygnału REPEATED START
+    I2C1->CR1 |= I2C_CR1_START;
+    
+    wait(I2C1->SR1 & I2C_SR1_SB);
+    // START wysłano
+    
+    
+    send_or_enqueue("dbg4");
+    
+    I2C1->DR = (LIS35DE_ADDR << 1) | 1U;
+
+    
+    I2C1->CR1 &= ~I2C_CR1_ACK;
+    
+    wait(I2C1->SR1 & I2C_SR1_ADDR);
+    // zakończona transmisja adresu
+    
+    send_or_enqueue("dbg5");
+    
+    I2C1->SR2;
+    
+    // wyślij STOP
+    I2C1->CR1 |= I2C_CR1_STOP;
+    
+    
+    wait(I2C1->SR1 & I2C_SR1_RXNE);
+    // ODEBRANO WYNIK
+    
+    
+    char value = I2C1->DR;
+    return value;
+}
+
+void EXTI0_IRQHandler(void) {
+    EXTI->PR = EXTI_PR_PR0;
+    
+    char MODE_FIRED[] = "MODE FIRED\r\n";
+    char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
+    
+    char res = MR_receive();
+    char resstr[5];
+    resstr[0] = res;
+    resstr[1] = '\n';
+    resstr[2] = '\0';
+    // sprintf(resstr, "%d\n", (int) res); TODO
+    // send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
+    
+    send_or_enqueue(resstr);
+}
+
 int main() {
     // Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
@@ -346,6 +428,9 @@ int main() {
 	RCC_AHB1ENR_DMA1EN;
 	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
+    // NOWE
+    i2c_config();  
+    
     __NOP();
 
 
@@ -357,7 +442,7 @@ int main() {
 	NVIC_EnableIRQ(EXTI15_10_IRQn);
     NVIC_EnableIRQ(EXTI0_IRQn);
 
-
+    
     for(;;);
 
 } // main
