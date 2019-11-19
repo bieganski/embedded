@@ -302,17 +302,15 @@ uint32_t const baudrate = 9600U;
 // PB8, PB9
 void i2c_config() {
     
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
-    RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
-    
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
+	RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
 
-    GPIOafConfigure(GPIOB, 8, GPIO_OType_OD,
-    GPIO_Low_Speed, GPIO_PuPd_NOPULL,
-    GPIO_AF_I2C1);
-    
-    GPIOafConfigure(GPIOB, 9, GPIO_OType_OD,
-    GPIO_Low_Speed, GPIO_PuPd_NOPULL,
-    GPIO_AF_I2C1);
+	GPIOafConfigure(GPIOB, 8, GPIO_OType_OD,
+	GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+	GPIO_AF_I2C1);
+	GPIOafConfigure(GPIOB, 9, GPIO_OType_OD,
+	GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+	GPIO_AF_I2C1);
     
     
     //  Konfiguruj szynę w wersji podstawowej
@@ -336,9 +334,31 @@ void i2c_config() {
 #define OUT_Y 0x2B
 #define OUT_Z 0x2D
 
+#define LIS35DE_CTRL_REG1 0x20
+#define LIS35DE_PD_BIT 7
+
 
 #define wait(cond) while(!(cond));
-    
+
+void LIS35DEpowerOn() {
+	I2C1->CR1 |= I2C_CR1_START;
+	wait(I2C1->SR1 & I2C_SR1_SB);
+	I2C1->DR = LIS35DE_ADDR << 1;
+	wait(I2C1->SR1 & I2C_SR1_ADDR);
+	I2C1->SR2;
+
+	// TODO ?
+	I2C1->DR = LIS35DE_CTRL_REG1;
+	wait(I2C1->SR1 & I2C_SR1_TXE);
+
+	// TODO ?
+	I2C1->DR = 1 << LIS35DE_PD_BIT | 0b111 ; // 7 ma kod binarny 111
+
+	wait(I2C1->SR1 & I2C_SR1_BTF);
+
+	I2C1->CR1 |= I2C_CR1_STOP;
+}
+
 
 // (master receive)
 char MR_receive() {
@@ -346,28 +366,28 @@ char MR_receive() {
     // Zainicjuj transmisję sygnału START
     I2C1->CR1 |= I2C_CR1_START;
     
-    send_or_enqueue("dbg0");
+    send_or_enqueue("0");
     
     wait(I2C1->SR1 & I2C_SR1_SB);
     // START wysłano
     
-    send_or_enqueue("dbg1");
+    // send_or_enqueue("1");
     I2C1->DR = LIS35DE_ADDR << 1;
     
     wait(I2C1->SR1 & I2C_SR1_ADDR);
     // ADRES wysłano
     
-    send_or_enqueue("dbg2");
+    // send_or_enqueue("2");
     // skasuj bit ADDR
     I2C1->SR2;
     
     // Zainicjuj wysyłanie 8-bitowego numeru rejestru slave’a
-    I2C1->DR = OUT_Y;
+    I2C1->DR = OUT_X;
     
     wait(I2C1->SR1 & I2C_SR1_BTF);
     // dane wysłano (numer rejestru slave'a)
     
-    send_or_enqueue("dbg3");
+    // send_or_enqueue("3");
     
     // Zainicjuj transmisję sygnału REPEATED START
     I2C1->CR1 |= I2C_CR1_START;
@@ -376,8 +396,9 @@ char MR_receive() {
     // START wysłano
     
     
-    send_or_enqueue("dbg4");
+    // send_or_enqueue("4");
     
+    // tryb MR
     I2C1->DR = (LIS35DE_ADDR << 1) | 1U;
 
     
@@ -386,9 +407,9 @@ char MR_receive() {
     wait(I2C1->SR1 & I2C_SR1_ADDR);
     // zakończona transmisja adresu
     
-    send_or_enqueue("dbg5");
+    // send_or_enqueue("5");
     
-    I2C1->SR2;
+    char nic = I2C1->SR2;
     
     // wyślij STOP
     I2C1->CR1 |= I2C_CR1_STOP;
@@ -397,14 +418,13 @@ char MR_receive() {
     wait(I2C1->SR1 & I2C_SR1_RXNE);
     // ODEBRANO WYNIK
     
+    send_or_enqueue("6");
     
     char value = I2C1->DR;
     return value;
 }
 
 void EXTI0_IRQHandler(void) {
-    EXTI->PR = EXTI_PR_PR0;
-    
     char MODE_FIRED[] = "MODE FIRED\r\n";
     char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
     
@@ -417,6 +437,8 @@ void EXTI0_IRQHandler(void) {
     // send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
     
     send_or_enqueue(resstr);
+
+    EXTI->PR = EXTI_PR_PR0;
 }
 
 int main() {
@@ -429,18 +451,21 @@ int main() {
 	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
     // NOWE
-    i2c_config();  
+	i2c_config();  
+	LIS35DEpowerOn();
+
+
     
-    __NOP();
+	__NOP();
 
 
 	DMAconfig();
 	LedsConfig();
 	UserButInterruptEXTIConfig();
-    ModeButInterruptEXTIConfig();
-    DMA_USART_config();
+	ModeButInterruptEXTIConfig();
+	DMA_USART_config();
 	NVIC_EnableIRQ(EXTI15_10_IRQn);
-    NVIC_EnableIRQ(EXTI0_IRQn);
+	NVIC_EnableIRQ(EXTI0_IRQn);
 
     
     for(;;);
