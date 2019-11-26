@@ -344,15 +344,17 @@ void LIS35DEpowerOn() {
 	I2C1->CR1 |= I2C_CR1_START;
 	wait(I2C1->SR1 & I2C_SR1_SB);
 	I2C1->DR = LIS35DE_ADDR << 1;
+
 	wait(I2C1->SR1 & I2C_SR1_ADDR);
+
 	I2C1->SR2;
 
-	// TODO ?
+	// piszemy do rejestru kontrolnego
 	I2C1->DR = LIS35DE_CTRL_REG1;
+
 	wait(I2C1->SR1 & I2C_SR1_TXE);
 
-	// TODO ?
-	I2C1->DR = 1 << LIS35DE_PD_BIT | 0b111 ; // 7 ma kod binarny 111
+	I2C1->DR = 0b01000111;
 
 	wait(I2C1->SR1 & I2C_SR1_BTF);
 
@@ -366,7 +368,7 @@ char MR_receive() {
     // Zainicjuj transmisję sygnału START
     I2C1->CR1 |= I2C_CR1_START;
     
-    send_or_enqueue("0");
+    // send_or_enqueue("0");
     
     wait(I2C1->SR1 & I2C_SR1_SB);
     // START wysłano
@@ -418,7 +420,7 @@ char MR_receive() {
     wait(I2C1->SR1 & I2C_SR1_RXNE);
     // ODEBRANO WYNIK
     
-    send_or_enqueue("6");
+    // send_or_enqueue("6");
     
     char value = I2C1->DR;
     return value;
@@ -430,12 +432,14 @@ void EXTI0_IRQHandler(void) {
     
     char res = MR_receive();
     char resstr[5];
-    resstr[0] = res;
+    resstr[0] = res == NULL ? 'X' : res;
     resstr[1] = '\n';
     resstr[2] = '\0';
+    if (strlen(resstr) == 0)
+	send_or_enqueue("zle");
     // sprintf(resstr, "%d\n", (int) res); TODO
     // send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
-    
+    EXTI->PR = EXTI_PR_PR0;
     send_or_enqueue(resstr);
 
     EXTI->PR = EXTI_PR_PR0;
@@ -451,12 +455,11 @@ int main() {
 	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
     // NOWE
-	i2c_config();  
-	LIS35DEpowerOn();
-
-
-    
+	i2c_config();
 	__NOP();
+
+
+	LIS35DEpowerOn();
 
 
 	DMAconfig();
