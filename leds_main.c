@@ -363,7 +363,7 @@ void LIS35DEpowerOn() {
 
 
 // (master receive)
-char MR_receive() {
+char MR_receive(char reg) {
     
     // Zainicjuj transmisję sygnału START
     I2C1->CR1 |= I2C_CR1_START;
@@ -384,7 +384,7 @@ char MR_receive() {
     I2C1->SR2;
     
     // Zainicjuj wysyłanie 8-bitowego numeru rejestru slave’a
-    I2C1->DR = OUT_X;
+    I2C1->DR = reg;
     
     wait(I2C1->SR1 & I2C_SR1_BTF);
     // dane wysłano (numer rejestru slave'a)
@@ -430,7 +430,7 @@ void EXTI0_IRQHandler(void) {
     char MODE_FIRED[] = "MODE FIRED\r\n";
     char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
     
-    char res = MR_receive();
+    char res = MR_receive(OUT_X);
     char resstr[5];
     resstr[0] = res == NULL ? 'X' : res;
     resstr[1] = '\n';
@@ -443,6 +443,40 @@ void EXTI0_IRQHandler(void) {
     send_or_enqueue(resstr);
 
     EXTI->PR = EXTI_PR_PR0;
+}
+
+void CounterConfig() {
+	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+	TIM3->CR1 = 0; //  w górę
+	TIM3->PSC = 1000;
+	TIM3->ARR = 0xffff;
+	TIM3->EGR = TIM_EGR_UG; // zainicjuj prescaler i auto reload
+
+	// przerwania
+	NVIC_EnableIRQ(TIM3_IRQn);
+
+	TIM3->SR = ~(TIM_SR_UIF | TIM_SR_CC1IF); // TODO UIF nie trzeba
+	TIM3->CCR1 = 0xfff0; // TODO
+	TIM3->DIER = TIM_DIER_UIE | TIM_DIER_CC1IE;
+}
+
+void CounterEnable() {
+	TIM3->CR1 |= TIM_CR1_CEN;
+}
+
+
+void TIM3_IRQHandler(void) {
+	uint32_t it_status = TIM3->SR & TIM3->DIER;
+	if (it_status & TIM_SR_UIF) {
+		TIM3->SR = ~TIM_SR_UIF;
+		send_or_enqueue("tego nie powinno byc\r\n");
+	}
+
+	if (it_status & TIM_SR_CC1IF) {
+		TIM3->SR = ~TIM_SR_CC1IF;
+		send_or_enqueue("przerwanie\r\n");
+		BlueLEDon();
+	}
 }
 
 int main() {
@@ -470,8 +504,15 @@ int main() {
 	NVIC_EnableIRQ(EXTI15_10_IRQn);
 	NVIC_EnableIRQ(EXTI0_IRQn);
 
-    
-    for(;;);
+	CounterConfig();
+	CounterEnable();
+
+	for(;;) {
+		// char x = MR_receive(OUT_X);
+		// char y = MR_receive(OUT_Y);
+		// char z = MR_receive(OUT_Z);
+		
+	}
 
 } // main
 
