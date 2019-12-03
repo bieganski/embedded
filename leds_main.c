@@ -448,37 +448,49 @@ void EXTI0_IRQHandler(void) {
 void CounterConfig() {
 	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 	TIM3->CR1 = 0; //  w górę
-	TIM3->PSC = 1000;
+	TIM3->PSC = 10;
 	TIM3->ARR = 0xffff;
 	TIM3->EGR = TIM_EGR_UG; // zainicjuj prescaler i auto reload
 
-	// przerwania
-	NVIC_EnableIRQ(TIM3_IRQn);
 
-	TIM3->SR = ~(TIM_SR_UIF | TIM_SR_CC1IF); // TODO UIF nie trzeba
+	TIM3->SR = ~TIM_SR_CC1IF; // TODO ~(TIM_SR_UIF | TIM_SR_CC1IF)
 
-	TIM3->DIER = TIM_DIER_UIE | TIM_DIER_CC1IE;
+	TIM3->DIER = TIM_DIER_CC1IE; // TODO TIM_DIER_UIE | TIM_DIER_CC1IE;
 
 
 	TIM3->CCR1 = 0xfff0; // TODO
+
+
+	// przerwania
+	NVIC_EnableIRQ(TIM3_IRQn);
 }
 
-void CounterEnable() {
-	TIM3->CR1 |= TIM_CR1_CEN;
-}
-
+static int toggle = 1;
 
 void TIM3_IRQHandler(void) {
 	uint32_t it_status = TIM3->SR & TIM3->DIER;
 	if (it_status & TIM_SR_UIF) {
 		TIM3->SR = ~TIM_SR_UIF;
+/*			
+		toggle = 1 - toggle;
+		if (toggle == 0)
+			RedLEDon();
+		else
+			RedLEDoff();
+*/
 		send_or_enqueue("tego nie powinno byc\r\n");
 	}
 
 	if (it_status & TIM_SR_CC1IF) {
 		TIM3->SR = ~TIM_SR_CC1IF;
 		send_or_enqueue("przerwanie\r\n");
-		BlueLEDon();
+/*
+		toggle = 1 - toggle;
+		if (toggle == 0)
+			BlueLEDon();
+		else
+			BlueLEDoff();
+*/
 	}
 }
 
@@ -494,13 +506,15 @@ void counterToLed() {
 	GPIO_Low_Speed,
 	GPIO_PuPd_NOPULL, GPIO_AF_TIM3); // zielona
 
+/*
 	GPIOafConfigure(GPIOB, 0, GPIO_OType_PP,
 	GPIO_Low_Speed,
 	GPIO_PuPd_NOPULL, GPIO_AF_TIM3); // niebieska
+*/
 
 	// 1,2
 	TIM3->CCMR1 =
-	TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1 |
+	TIM_CCMR1_OC1M_2 | TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_0 |  
 	TIM_CCMR1_OC1PE |
 	TIM_CCMR1_OC2M_2 | TIM_CCMR1_OC2M_1 |
 	TIM_CCMR1_OC2M_0 | TIM_CCMR1_OC2PE;
@@ -526,6 +540,12 @@ void counterToLed() {
 	TIM3->CCR2 = 499;
 }
 
+
+void CounterEnable() {
+	TIM3->CR1 |= TIM_CR1_CEN;
+}	
+
+
 int main() {
     // Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
@@ -535,7 +555,7 @@ int main() {
 	RCC_AHB1ENR_DMA1EN;
 	RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
 
-    // NOWE
+ 
 	i2c_config();
 	__NOP();
 
@@ -545,14 +565,16 @@ int main() {
 
 	DMAconfig();
 	LedsConfig();
-	UserButInterruptEXTIConfig();
-	ModeButInterruptEXTIConfig();
-	DMA_USART_config();
-	NVIC_EnableIRQ(EXTI15_10_IRQn);
-	NVIC_EnableIRQ(EXTI0_IRQn);
+	DMA_USART_config();	
+	// UserButInterruptEXTIConfig();
+	// ModeButInterruptEXTIConfig();
+	
+	// NVIC_EnableIRQ(EXTI15_10_IRQn);
+	// NVIC_EnableIRQ(EXTI0_IRQn);
 
 	CounterConfig();
 	CounterEnable();
+	counterToLed();
 
 	for(;;) {
 		// char x = MR_receive(OUT_X);
