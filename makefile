@@ -11,7 +11,7 @@ LDFLAGS = $(FLAGS) -Wl,--gc-sections -nostartfiles \
 -L/opt/arm/stm32/lds -Tstm32f411re.lds
 vpath %.c /opt/arm/stm32/src
 
-OBJECTS = leds_main.o startup_stm32.o delay.o gpio.o
+OBJECTS = debug.o leds.o leds_main.o startup_stm32.o delay.o gpio.o
 TARGET = leds
 
 .SECONDARY: $(TARGET).elf $(OBJECTS)

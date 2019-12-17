@@ -5,296 +5,10 @@
 
 #include <irq.h>
 
-#define RED_LED_GPIO GPIOA
-#define GREEN_LED_GPIO GPIOA
-#define BLUE_LED_GPIO GPIOB
-#define GREEN2_LED_GPIO GPIOA
 
-#define RED_LED_PIN 6
-#define GREEN_LED_PIN 7
-#define BLUE_LED_PIN 0
-#define GREEN2_LED_PIN 5
+#include "leds.h"
+#include "debug.h"
 
-#define RedLEDon() \
-RED_LED_GPIO->BSRR = 1 << (RED_LED_PIN + 16)
-#define RedLEDoff() \
-RED_LED_GPIO->BSRR = 1 << RED_LED_PIN
-
-
-#define GreenLEDon() \
-GREEN_LED_GPIO->BSRR = 1 << (16 + GREEN_LED_PIN)
-#define GreenLEDoff() \
-GREEN_LED_GPIO->BSRR = 1 << GREEN_LED_PIN
-
-
-#define BlueLEDon() \
-BLUE_LED_GPIO->BSRR = 1 << (16 + BLUE_LED_PIN)
-#define BlueLEDoff() \
-BLUE_LED_GPIO->BSRR = 1 << BLUE_LED_PIN
-
-
-// wlaczana jedynka
-#define Green2LEDon() \
-GREEN2_LED_GPIO->BSRR = 1 << GREEN2_LED_PIN
-#define Green2LEDoff() \
-GREEN2_LED_GPIO->BSRR = 1 << (GREEN2_LED_PIN + 16)
-
-
-#define MODE_BUT_PIN 0
-#define MODE_BUT_GPIO GPIOA
-int mode_but_enabled() {
-	return ( MODE_BUT_GPIO->IDR & (1 << MODE_BUT_PIN) ) == 1;
-}
-
-
-#define USER_BUT_PIN 13
-#define USER_BUT_GPIO GPIOC
-int user_but_enabled() {
-	return ( USER_BUT_GPIO->IDR & (1 << USER_BUT_PIN) ) == 0;
-}
-
-
-// Tryb pracy
-#define USART_Mode_Rx_Tx (USART_CR1_RE | \
-	USART_CR1_TE)
-#define USART_Enable USART_CR1_UE
-// Przesyłane słowo to dane łącznie z ewentualnym bitem parzystości
-#define USART_WordLength_8b 0x0000
-#define USART_WordLength_9b USART_CR1_M
-// Bit parzystości
-#define USART_Parity_No 0x0000
-#define USART_Parity_Even USART_CR1_PCE
-#define USART_Parity_Odd (USART_CR1_PCE | \
-	USART_CR1_PS)
-
-
-#define USART_StopBits_1 0x0000
-#define USART_StopBits_0_5 0x1000
-#define USART_StopBits_2 0x2000
-#define USART_StopBits_1_5 0x3000
-
-
-#define USART_FlowControl_None 0x0000
-#define USART_FlowControl_RTS USART_CR3_RTSE
-#define USART_FlowControl_CTS USART_CR3_CTSE
-
-#define HSI_HZ 16000000U
-#define PCLK1_HZ HSI_HZ
-
-
-void DMAconfig() {
-	GPIOafConfigure(GPIOA,
-	2,
-	GPIO_OType_PP,
-	GPIO_Fast_Speed,
-	GPIO_PuPd_NOPULL,
-	GPIO_AF_USART2);
-
-	GPIOafConfigure(GPIOA,
-	3,
-	GPIO_OType_PP,
-	GPIO_Fast_Speed,
-	GPIO_PuPd_UP,
-	GPIO_AF_USART2);
-}
-
-
-void LedsConfig() {
-
-	RedLEDoff();
-	GreenLEDoff();
-	BlueLEDoff();
-	Green2LEDoff();
-
-	GPIOoutConfigure(RED_LED_GPIO,
-	RED_LED_PIN,
-	GPIO_OType_PP,
-	GPIO_Low_Speed,	
-	GPIO_PuPd_NOPULL);
-
-	GPIOoutConfigure(GREEN_LED_GPIO,
-	GREEN_LED_PIN,
-	GPIO_OType_PP,
-	GPIO_Low_Speed,
-	GPIO_PuPd_NOPULL);
-
-	GPIOoutConfigure(BLUE_LED_GPIO,
-	BLUE_LED_PIN,
-	GPIO_OType_PP,
-	GPIO_Low_Speed,
-	GPIO_PuPd_NOPULL);
-
-	GPIOoutConfigure(GREEN2_LED_GPIO,
-	GREEN2_LED_PIN,
-	GPIO_OType_PP,
-	GPIO_Low_Speed,
-	GPIO_PuPd_NOPULL);
-
-}
-
-
-#define USER_INT_PRIO LOW_IRQ_PRIO
-#define USER_INT_SUBPRIO LOW_IRQ_SUBPRIO
-void UserButInterruptPrioritiesSetup() {
-	IRQsetPriority(EXTI15_10_IRQn, USER_INT_PRIO, USER_INT_SUBPRIO);
-}
-
-void UserButInterruptEXTIConfig() {
-
-	GPIOinConfigure(USER_BUT_GPIO, 
-	USER_BUT_PIN,
-	GPIO_PuPd_NOPULL,
-	EXTI_Mode_Interrupt,
-	EXTI_Trigger_Rising_Falling);
-
-
-	EXTI->PR = 1 << USER_BUT_PIN;
-}
-
-void ModeButInterruptEXTIConfig() {
-	GPIOinConfigure(MODE_BUT_GPIO, 
-	MODE_BUT_PIN,
-	GPIO_PuPd_NOPULL,
-	EXTI_Mode_Interrupt,
-	EXTI_Trigger_Rising_Falling);
-
-	EXTI->PR = 1 << MODE_BUT_PIN;
-}
-
-uint32_t QUE_IDX_MIN = 0;
-uint32_t QUE_IDX_MAX = 0;
-#define QUE_SIZE 127
-char* QUEUE[QUE_SIZE];
-
-
-void send() {
-    if (QUE_IDX_MAX == QUE_IDX_MIN)
-        return; // nie ma nic do wysłania
-    uint32_t idx = QUE_IDX_MIN % QUE_SIZE;
-    if (QUEUE[idx] != NULL) {
-        DMA1_Stream6->M0AR = (uint32_t)QUEUE[idx];
-        DMA1_Stream6->NDTR = strlen(QUEUE[idx]);
-        DMA1_Stream6->CR |= DMA_SxCR_EN;
-        QUE_IDX_MIN++;
-    }
-}
-
-void send_or_enqueue(char* text) {
-    uint32_t idx = QUE_IDX_MAX % QUE_SIZE;
-    QUEUE[idx] = text;
-    QUE_IDX_MAX++;
-    
-    if ((DMA1_Stream6->CR & DMA_SxCR_EN) == 0 &&
-        (DMA1->HISR & DMA_HISR_TCIF6) == 0) {
-        send();
-    } else {
-        // nie można wysłać bo DMA zajęte
-        return;
-    }
-}
-
-// HANDLER PRZERWANIA PO WYSŁANIU
-void DMA1_Stream6_IRQHandler() {
-	/* Odczytaj zgłoszone przerwania DMA1. */
-	uint32_t isr = DMA1->HISR;
-	if (isr & DMA_HISR_TCIF6) {
-		/* Obsłuż zakończenie transferu
-		w strumieniu 6. */
-		DMA1->HIFCR = DMA_HIFCR_CTCIF6;
-
-        /* Jeśli jest coś do wysłania,
-            wystartuj kolejną transmisję. */
-        send();
-	}
-}
-
-
-void DMA1_Stream5_IRQHandler() {
-	/* Odczytaj zgłoszone przerwania DMA1. */
-	uint32_t isr = DMA1->HISR;
-
-	if (isr & DMA_HISR_TCIF5) {
-		/* Obsłuż zakończenie transferu
-		w strumieniu 5. */
-		DMA1->HIFCR = DMA_HIFCR_CTCIF5;
-		RedLEDoff();
-		BlueLEDon();
-		Green2LEDon();
-	/* Ponownie uaktywnij odbieranie. */
-	}
-
-}
-
-
-void EXTI15_10_IRQHandler(void) {
-	EXTI->PR = EXTI_PR_PR13;
-    /* Tu wstaw kod obsługujący przerwanie. */
-
-    char USER_FIRED[] = "USER FIRED\r\n";
-    char USER_UNFIRED[] = "USER UNFIRED\r\n";
-    
-
-    /*
-    int user_but_enabled() {
-        return ( USER_BUT_GPIO->IDR & (1 << USER_BUT_PIN) ) == 0;
-    }
-    */
-    send_or_enqueue(user_but_enabled() ? USER_FIRED : USER_UNFIRED);
-}
-
-
-void DMA_USART_config() {
-uint32_t const baudrate = 9600U;
-	// USART
-	USART2->CR1 = USART_CR1_RE | USART_CR1_TE;
-	USART2->CR2 = 0;
-	USART2->BRR = (PCLK1_HZ + (baudrate / 2U)) / baudrate;
-
-	// DMA
-	USART2->CR3 = USART_CR3_DMAT | USART_CR3_DMAR;
-
-
-    /*
-    USART2 TX korzysta ze strumienia 6 i kanału 4, tryb
-    bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
-    adresu pamięci po każdym przesłaniu, przerwanie po
-    zakończeniu transmisji
-    */
-    DMA1_Stream6->CR = 4U << 25 |
-    DMA_SxCR_PL_1 |
-    DMA_SxCR_MINC |
-    DMA_SxCR_DIR_0 |
-    DMA_SxCR_TCIE;
-
-    // Adres układu peryferyjnego nie zmienia się
-    DMA1_Stream6->PAR = (uint32_t)&USART2->DR;
-
-    /*
-    USART2 RX korzysta ze strumienia 5 i kanału 4, tryb
-    bezpośredni, transfery 8-bitowe, wysoki priorytet, zwiększanie
-    adresu pamięci po każdym przesłaniu, przerwanie po
-    zakończeniu transmisji
-    */
-    DMA1_Stream5->CR = 4U << 25 |
-    DMA_SxCR_PL_1 |
-    DMA_SxCR_MINC |
-    DMA_SxCR_TCIE;
-
-    // Adres ukladu per. sie nie zmienia
-    DMA1_Stream5->PAR = (uint32_t)&USART2->DR;
-
-
-    // Wyczyść znaczniki przerwań i włącz przerwania
-    DMA1->HIFCR = DMA_HIFCR_CTCIF6 |
-    DMA_HIFCR_CTCIF5;
-    NVIC_EnableIRQ(DMA1_Stream6_IRQn);
-    NVIC_EnableIRQ(DMA1_Stream5_IRQn);
-
-
-    // ENABLE
-    USART2->CR1 |= USART_CR1_UE;
-    
-}
 
 // PB8, PB9
 void i2c_config() {
@@ -341,14 +55,6 @@ void i2c_config() {
 
 uint8_t MR_receive(char reg);
 
-
-
-static int toggle = 1;
-
-static int PSC = 0;
-static int ARR = 100;
-
-
 // #define LIS35DE_INT1_GPIO GPIOA
 // #define LIS35DE_INT1_PIN 1
 
@@ -368,36 +74,14 @@ void EXTI9_5_IRQHandler(void) {
 	}
 	while( (LIS35DE_INT2_GPIO->IDR & (1 << LIS35DE_INT2_PIN)) != 0);
 
+	if (x == 0)
+		x = 0b00000001;
 
-/*
- 	// send_or_enqueue("tessdsdst\n");
-	if (PSC % ARR == 0) {
-		toggle = 1 - toggle;
-		if (toggle == 0)
-			BlueLEDon();
-		else
-			BlueLEDoff();
-		// send_or_enqueue("test\n");
-	}
-	PSC++;
-*/
-	char * napis;
-	char xx[2];
-	char yy[2];
-	xx[0] = (char) x;
-	yy[0] = (char) y;
-	napis = strcat(xx, ",");
-	napis = strcat(napis, yy);
-	napis = strcat(napis, "\n");
-	/*
-	napis = strcat("WYNIK: ", xx);
-	napis = strcat(napis, ",");
-	napis = strcat(napis, yy);
-	napis = strcat(napis, "\n");
-	*/
-	// send_or_enqueue(napis);
-	TIM3->CCR1 = x;
-	TIM3->CCR2 = y;
+	if (y == 0)
+		y = 0b00000001;
+
+		TIM3->CCR1 = x;
+		TIM3->CCR2 = y;
 }
 
 
@@ -410,7 +94,6 @@ void LIS35DEwrite(int reg, int val) {
 
 	I2C1->SR2;
 
-	// piszemy do rejestru kontrolnego
 	I2C1->DR = reg;
 
 	wait(I2C1->SR1 & I2C_SR1_TXE);
@@ -428,7 +111,7 @@ void LIS35DEreset() {
 }
 
 void LIS35DEpowerOn() {
-	LIS35DEwrite(LIS35DE_CTRL_REG1, 0b01000111);
+	LIS35DEwrite(LIS35DE_CTRL_REG1, 0b01000111); // power on, enable x,y,z reading
 }
 
 void LIS35DEenableIntAfterMeasured() {
@@ -451,18 +134,14 @@ uint8_t MR_receive(char reg) {
     // Zainicjuj transmisję sygnału START
     I2C1->CR1 |= I2C_CR1_START;
     
-    // send_or_enqueue("0");
-    
     wait(I2C1->SR1 & I2C_SR1_SB);
     // START wysłano
     
-    // send_or_enqueue("1");
     I2C1->DR = LIS35DE_ADDR << 1;
     
     wait(I2C1->SR1 & I2C_SR1_ADDR);
     // ADRES wysłano
     
-    // send_or_enqueue("2");
     // skasuj bit ADDR
     I2C1->SR2;
     
@@ -472,16 +151,11 @@ uint8_t MR_receive(char reg) {
     wait(I2C1->SR1 & I2C_SR1_BTF);
     // dane wysłano (numer rejestru slave'a)
     
-    // send_or_enqueue("3");
-    
     // Zainicjuj transmisję sygnału REPEATED START
     I2C1->CR1 |= I2C_CR1_START;
     
     wait(I2C1->SR1 & I2C_SR1_SB);
     // START wysłano
-    
-    
-    // send_or_enqueue("4");
     
     // tryb MR
     I2C1->DR = (LIS35DE_ADDR << 1) | 1U;
@@ -492,7 +166,6 @@ uint8_t MR_receive(char reg) {
     wait(I2C1->SR1 & I2C_SR1_ADDR);
     // zakończona transmisja adresu
     
-    // send_or_enqueue("5");
     
     char nic = I2C1->SR2;
     
@@ -502,47 +175,19 @@ uint8_t MR_receive(char reg) {
     
     wait(I2C1->SR1 & I2C_SR1_RXNE);
     // ODEBRANO WYNIK
-    
-    // send_or_enqueue("6");
-    
     uint8_t value = I2C1->DR;
     return value;
-}
-
-void EXTI0_IRQHandler(void) {
-    char MODE_FIRED[] = "MODE FIRED\r\n";
-    char MODE_UNFIRED[] = "MODE UNFIRED\r\n";
-    
-    char res = MR_receive(OUT_X);
-    char resstr[5];
-    resstr[0] = res == '\0' ? 'X' : res;
-    resstr[1] = '\n';
-    resstr[2] = '\0';
-    if (strlen(resstr) == 0)
-	send_or_enqueue("zle");
-    // sprintf(resstr, "%d\n", (int) res); TODO
-    // send_or_enqueue(mode_but_enabled() ? MODE_FIRED : MODE_UNFIRED);
-    EXTI->PR = EXTI_PR_PR0;
-    send_or_enqueue(resstr);
-
-    EXTI->PR = EXTI_PR_PR0;
 }
 
 void CounterConfig() {
 	RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
 	TIM3->CR1 = 0; //  w górę
-	TIM3->PSC = 10;
-	TIM3->ARR = 0xffff;
-	TIM3->EGR = TIM_EGR_UG; // zainicjuj prescaler i auto reload
 
+	TIM3->EGR = TIM_EGR_UG; // zainicjuj prescaler i auto reload
 
 	TIM3->SR = ~TIM_SR_CC1IF; // TODO ~(TIM_SR_UIF | TIM_SR_CC1IF)
 
 	TIM3->DIER = TIM_DIER_CC1IE; // TODO TIM_DIER_UIE | TIM_DIER_CC1IE;
-
-
-	TIM3->CCR1 = 0xfff0; // TODO
-
 
 	// przerwania
 	NVIC_EnableIRQ(TIM3_IRQn);
@@ -553,20 +198,10 @@ void TIM3_IRQHandler(void) {
 	uint32_t it_status = TIM3->SR & TIM3->DIER;
 	if (it_status & TIM_SR_UIF) {
 		TIM3->SR = ~TIM_SR_UIF;
-/*			
-		toggle = 1 - toggle;
-		if (toggle == 0)
-			RedLEDon();
-		else
-			RedLEDoff();
-*/
-		// send_or_enqueue("tego nie powinno byc\r\n");
 	}
 
 	if (it_status & TIM_SR_CC1IF) {
 		TIM3->SR = ~TIM_SR_CC1IF;
-		// send_or_enqueue("przerwanie\r\n");
-
 	}
 }
 
@@ -609,11 +244,11 @@ void counterToLed() {
 	// Włączamy licznik w trybie zliczania w górę z buforowaniem rejestru TIM3->ARR
 	TIM3->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
 
-	// TIM3->PSC = 63999;
-	TIM3->ARR = 749;
+	TIM3->PSC = 999;
+	TIM3->ARR = 0xff;
 	TIM3->EGR = TIM_EGR_UG;
-	TIM3->CCR1 = 700;
-	TIM3->CCR2 = 700;
+	TIM3->CCR1 = 40;
+	TIM3->CCR2 = 40;
 }
 
 
@@ -623,7 +258,7 @@ void CounterEnable() {
 
 
 int main() {
-    // Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
+    	// Trzeba pamiętać o uprzednim włączeniu taktowania układu SYSCFG
 	RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
     
 	// włączenie GPIO, DMA, USART
@@ -638,7 +273,7 @@ int main() {
 
 	LIS35DE_GPIO_IntEnable();
 
-	LIS35DEreset(); // TODO
+	LIS35DEreset();
 	
 	EXTI->PR = 1 << 8;
 	NVIC_EnableIRQ(EXTI9_5_IRQn);
@@ -648,12 +283,7 @@ int main() {
 
 	DMAconfig();
 	LedsConfig();
-	DMA_USART_config();	
-	// UserButInterruptEXTIConfig();
-	// ModeButInterruptEXTIConfig();
-	
-	// NVIC_EnableIRQ(EXTI15_10_IRQn);
-	// NVIC_EnableIRQ(EXTI0_IRQn);
+	DMA_USART_config();
 
 	CounterConfig();
 	CounterEnable();
