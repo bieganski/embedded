@@ -226,9 +226,6 @@ void DMA1_Stream5_IRQHandler() {
 }
 
 
-
-
-
 void EXTI15_10_IRQHandler(void) {
 	EXTI->PR = EXTI_PR_PR13;
     /* Tu wstaw kod obsługujący przerwanie. */
@@ -335,12 +332,76 @@ void i2c_config() {
 #define OUT_Z 0x2D
 
 #define LIS35DE_CTRL_REG1 0x20
+#define LIS35DE_CTRL_REG3 0x22
 #define LIS35DE_PD_BIT 7
 
 
 #define wait(cond) while(!(cond));
 
-void LIS35DEpowerOn() {
+
+uint8_t MR_receive(char reg);
+
+
+
+static int toggle = 1;
+
+static int PSC = 0;
+static int ARR = 100;
+
+
+// #define LIS35DE_INT1_GPIO GPIOA
+// #define LIS35DE_INT1_PIN 1
+
+#define LIS35DE_INT2_GPIO GPIOA
+#define LIS35DE_INT2_PIN 8
+
+
+void EXTI9_5_IRQHandler(void) {
+	EXTI->PR = EXTI_PR_PR8; // int2 
+
+	uint8_t x,z,y;
+
+ 	do {
+		x = MR_receive(OUT_X);
+		y = MR_receive(OUT_Y);
+		z = MR_receive(OUT_Z);
+	}
+	while( (LIS35DE_INT2_GPIO->IDR & (1 << LIS35DE_INT2_PIN)) != 0);
+
+
+/*
+ 	// send_or_enqueue("tessdsdst\n");
+	if (PSC % ARR == 0) {
+		toggle = 1 - toggle;
+		if (toggle == 0)
+			BlueLEDon();
+		else
+			BlueLEDoff();
+		// send_or_enqueue("test\n");
+	}
+	PSC++;
+*/
+	char * napis;
+	char xx[2];
+	char yy[2];
+	xx[0] = (char) x;
+	yy[0] = (char) y;
+	napis = strcat(xx, ",");
+	napis = strcat(napis, yy);
+	napis = strcat(napis, "\n");
+	/*
+	napis = strcat("WYNIK: ", xx);
+	napis = strcat(napis, ",");
+	napis = strcat(napis, yy);
+	napis = strcat(napis, "\n");
+	*/
+	// send_or_enqueue(napis);
+	TIM3->CCR1 = x;
+	TIM3->CCR2 = y;
+}
+
+
+void LIS35DEwrite(int reg, int val) {
 	I2C1->CR1 |= I2C_CR1_START;
 	wait(I2C1->SR1 & I2C_SR1_SB);
 	I2C1->DR = LIS35DE_ADDR << 1;
@@ -350,21 +411,43 @@ void LIS35DEpowerOn() {
 	I2C1->SR2;
 
 	// piszemy do rejestru kontrolnego
-	I2C1->DR = LIS35DE_CTRL_REG1;
+	I2C1->DR = reg;
 
 	wait(I2C1->SR1 & I2C_SR1_TXE);
 
-	I2C1->DR = 0b01000111;
+	I2C1->DR = val;
 
 	wait(I2C1->SR1 & I2C_SR1_BTF);
 
 	I2C1->CR1 |= I2C_CR1_STOP;
 }
 
+void LIS35DEreset() {
+	LIS35DEwrite(LIS35DE_CTRL_REG1, 0b00000000);
+	LIS35DEwrite(LIS35DE_CTRL_REG3, 0b00000000);
+}
+
+void LIS35DEpowerOn() {
+	LIS35DEwrite(LIS35DE_CTRL_REG1, 0b01000111);
+}
+
+void LIS35DEenableIntAfterMeasured() {
+	LIS35DEwrite(LIS35DE_CTRL_REG3, 0b10100000); // active low, push-pull, data ready, int2 line
+}
+
+
+
+void LIS35DE_GPIO_IntEnable() {
+	GPIOinConfigure(LIS35DE_INT2_GPIO, 
+	LIS35DE_INT2_PIN,
+	GPIO_PuPd_NOPULL,
+	EXTI_Mode_Interrupt,
+	EXTI_Trigger_Falling);
+}
+
 
 // (master receive)
-char MR_receive(char reg) {
-    
+uint8_t MR_receive(char reg) {
     // Zainicjuj transmisję sygnału START
     I2C1->CR1 |= I2C_CR1_START;
     
@@ -422,7 +505,7 @@ char MR_receive(char reg) {
     
     // send_or_enqueue("6");
     
-    char value = I2C1->DR;
+    uint8_t value = I2C1->DR;
     return value;
 }
 
@@ -432,7 +515,7 @@ void EXTI0_IRQHandler(void) {
     
     char res = MR_receive(OUT_X);
     char resstr[5];
-    resstr[0] = res == NULL ? 'X' : res;
+    resstr[0] = res == '\0' ? 'X' : res;
     resstr[1] = '\n';
     resstr[2] = '\0';
     if (strlen(resstr) == 0)
@@ -465,7 +548,6 @@ void CounterConfig() {
 	NVIC_EnableIRQ(TIM3_IRQn);
 }
 
-static int toggle = 1;
 
 void TIM3_IRQHandler(void) {
 	uint32_t it_status = TIM3->SR & TIM3->DIER;
@@ -478,19 +560,13 @@ void TIM3_IRQHandler(void) {
 		else
 			RedLEDoff();
 */
-		send_or_enqueue("tego nie powinno byc\r\n");
+		// send_or_enqueue("tego nie powinno byc\r\n");
 	}
 
 	if (it_status & TIM_SR_CC1IF) {
 		TIM3->SR = ~TIM_SR_CC1IF;
-		send_or_enqueue("przerwanie\r\n");
-/*
-		toggle = 1 - toggle;
-		if (toggle == 0)
-			BlueLEDon();
-		else
-			BlueLEDoff();
-*/
+		// send_or_enqueue("przerwanie\r\n");
+
 	}
 }
 
@@ -533,11 +609,11 @@ void counterToLed() {
 	// Włączamy licznik w trybie zliczania w górę z buforowaniem rejestru TIM3->ARR
 	TIM3->CR1 = TIM_CR1_ARPE | TIM_CR1_CEN;
 
-	TIM3->PSC = 63999;
+	// TIM3->PSC = 63999;
 	TIM3->ARR = 749;
 	TIM3->EGR = TIM_EGR_UG;
-	TIM3->CCR1 = 249;
-	TIM3->CCR2 = 499;
+	TIM3->CCR1 = 700;
+	TIM3->CCR2 = 700;
 }
 
 
@@ -560,8 +636,15 @@ int main() {
 	__NOP();
 
 
-	LIS35DEpowerOn();
+	LIS35DE_GPIO_IntEnable();
 
+	LIS35DEreset(); // TODO
+	
+	EXTI->PR = 1 << 8;
+	NVIC_EnableIRQ(EXTI9_5_IRQn);
+
+	LIS35DEpowerOn();
+	LIS35DEenableIntAfterMeasured();
 
 	DMAconfig();
 	LedsConfig();
@@ -577,10 +660,6 @@ int main() {
 	counterToLed();
 
 	for(;;) {
-		// char x = MR_receive(OUT_X);
-		// char y = MR_receive(OUT_Y);
-		// char z = MR_receive(OUT_Z);
-		
 	}
 
 } // main
