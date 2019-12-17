@@ -12,31 +12,31 @@
 
 // PB8, PB9
 void i2c_config() {
-    
+
 	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOBEN;
 	RCC->APB1ENR |= RCC_APB1ENR_I2C1EN;
 
 	GPIOafConfigure(GPIOB, 8, GPIO_OType_OD,
-	GPIO_Low_Speed, GPIO_PuPd_NOPULL,
-	GPIO_AF_I2C1);
+	                GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+			GPIO_AF_I2C1);
 	GPIOafConfigure(GPIOB, 9, GPIO_OType_OD,
-	GPIO_Low_Speed, GPIO_PuPd_NOPULL,
-	GPIO_AF_I2C1);
-    
-    
-    //  Konfiguruj szynę w wersji podstawowej
-    I2C1->CR1 = 0;
-    
-    // Konfiguruj częstotliwość taktowania szyny
-    #define I2C_SPEED_HZ 100000
-    #define PCLK1_MHZ 16
-    I2C1->CR2 = PCLK1_MHZ;
-    I2C1->CCR = (PCLK1_MHZ * 1000000) /
-    (I2C_SPEED_HZ << 1);
-    I2C1->TRISE = PCLK1_MHZ + 1;
-    
-    // Włącz szynę
-    I2C1->CR1 |= I2C_CR1_PE;
+			GPIO_Low_Speed, GPIO_PuPd_NOPULL,
+			GPIO_AF_I2C1);
+
+
+	//  Konfiguruj szynę w wersji podstawowej
+	I2C1->CR1 = 0;
+
+	// Konfiguruj częstotliwość taktowania szyny
+	#define I2C_SPEED_HZ 100000
+	#define PCLK1_MHZ 16
+	I2C1->CR2 = PCLK1_MHZ;
+	I2C1->CCR = (PCLK1_MHZ * 1000000) /
+	(I2C_SPEED_HZ << 1);
+	I2C1->TRISE = PCLK1_MHZ + 1;
+
+	// Włącz szynę
+	I2C1->CR1 |= I2C_CR1_PE;
 }
 
 
